@@ -1,17 +1,42 @@
+import datetime
+from http.client import HTTPException
 import frappe
 from fastapi import Depends, APIRouter
+import time
+from fast_frappe.socketio import sio
+default_space_id = 'default'
 router = APIRouter()
+
 
 @router.get("/api/v1/push")
 def handlePush(req, res):
-    return 'hello world'
+    push = req.body
+    # t0 = datetime.now()
+    t0 = time.monotonic()
+    try:
+        # iterate each mutation in the push
+        for mutation in push.mutations:
+            t1 = time.monotonic()
+            try:
+                processMutation(psg=frappe, clientID=push.clientID, spaceID=default_space_id, mutation=mutation)
+            except Exception as e:
+                processMutation(psg=frappe, clientID=push.clientID, spaceID=default_space_id, mutation=mutation, error=e)
+            print(f'Processed mutation in {datetime.now() - t1}')
+        sio.emit("default", "poke", namespace="/")
+        print("Sent ws response, poke")
+        return {}
+    except Exception as e:
+        print(e)
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        print(f"Processed push in {time.monotonic() - t0:.2f} seconds")
 
-def processMutation(psg, clientID, mutation, spaceID, error):
+
+def processMutation(psg, clientID, spaceID, mutation, error):
     """Table space only has 2 col (key, version)"""
     '''Process a mutation from the client'''
-    
     # _dict = frappe.db.sql(f"""select version from tabSpace where key = '{spaceID}' for update""").as_dict()
-    prev_version = frappe.get_doc('tabSpace', key=spaceID)
+    prev_version = frappe.get_doc('tabSpace', filters={"key": "spaceID"})
     nextVersion = prev_version + 1
     lastMutationID = getLatestMutationID(psg, clientID=clientID, required=False)
     nextMutationID = lastMutationID + 1
@@ -22,7 +47,7 @@ def processMutation(psg, clientID, mutation, spaceID, error):
     if mutation.id > nextMutationID:
         raise Exception(f"Mutation ID is from the future - aborting")
 
-    if (error == None):
+    if (error is None):
         print(f'Processing mutation: {mutation}')
         if mutation.name == 'createMessage':
             createMessage(mutation.type, mutation.args, spaceID, nextVersion)
@@ -55,7 +80,7 @@ def getLatestMutationID(psg, clientID, required):
         _type_: _description_
     """
     # clientRow = frappe.db.get_value("Replicache Client", client_id=clientID, latest_mutation_id=required)
-    clientRow = frappe.db.get_doc("RepClient", client_id=clientID)
+    clientRow = frappe.db.get_doc("RepClient", fitlers={'client_id': 'clientID'})
     if not clientRow:
         if required:
             raise Exception(f"Client not found {clientID}")
@@ -75,7 +100,7 @@ def setLatestMutationID(psg, clientID, mutationID):
     """
     # TODO: direct copy of the javascript which is incorrect, this need to check if there is any row with the clientID, mutationID and update them
     # result = frappe.db.get_value("Replicache Client", client_id=clientID, latest_mutation_id=mutationID)
-    result = frappe.get_doc("RepClient", client_id=clientID)
+    result = frappe.get_doc("RepClient", fitlers={'client_id': 'clientID'})
     if result:
         result.set("latest_mutation_id", mutationID)
         result.save()
@@ -83,7 +108,7 @@ def setLatestMutationID(psg, clientID, mutationID):
         result = frappe.new_doc({
             "doctype": "Replicache Client",
             "client_id": clientID,
-            "latest_mutation_id": mutationID  
+            "latest_mutation_id": mutationID
         })
         result.save()
         # frappe.db.insert({
@@ -91,7 +116,6 @@ def setLatestMutationID(psg, clientID, mutationID):
         #     "client_id": clientID,
         #     "latest_mutation_id": mutationID
         # })
-    
 
 
 def createMessage(t, _dict, spaceID, version):
@@ -128,6 +152,7 @@ def createMessage(t, _dict, spaceID, version):
     #     "version": version
     # })
 
-def sendPoke(sio):
-    '''Send a poke to the client to trigger a pull'''
-    sio.emit('poke', channel='replicache')
+
+# def sendPoke(sio):
+#     '''Send a poke to the client to trigger a pull'''
+#     sio.emit('poke', channel='replicache')
