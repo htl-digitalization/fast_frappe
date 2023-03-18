@@ -8,7 +8,7 @@ default_space_id = 'default'
 router = APIRouter()
 
 
-@router.get("/api/v1/push")
+@router.post("/api/v1/push")
 def handlePush(req, res):
     push = req.body
     # t0 = datetime.now()
@@ -42,10 +42,10 @@ def processMutation(psg, clientID, spaceID, mutation, error):
     nextMutationID = lastMutationID + 1
 
     if mutation.id < nextMutationID:
-        raise Exception(f"Mutation ID has already been processed - skipping")
+        raise Exception("Mutation ID has already been processed - skipping")
 
     if mutation.id > nextMutationID:
-        raise Exception(f"Mutation ID is from the future - aborting")
+        raise Exception("Mutation ID is from the future - aborting")
 
     if (error is None):
         print(f'Processing mutation: {mutation}')

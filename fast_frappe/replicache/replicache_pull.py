@@ -1,17 +1,15 @@
 import datetime
 import time
-from fast_frappe.fast_frappe.replicache.replicache_push import getLatestMutationID
+from fast_frappe.replicache.replicache_push import getLatestMutationID
 import frappe
 from fastapi import FastAPI, Depends, Request, Response, HTTPException, Depends, APIRouter 
 from fast_frappe.socketio import sio
-from restipie.custom_api_core.request import api
-# from restipie.custom_api_core import response
 
 
 router = APIRouter()
 
 
-@router("GET", '/v1/api/pull')
+@router.get('/v1/api/pull')
 def handle_pull(req: Request, res: Response, *args, **kwargs):
     defaultSpaceID = 'default'
     pull = req.body
