@@ -1,7 +1,8 @@
 import datetime
 from http.client import HTTPException
 import frappe
-from fastapi import Depends, APIRouter
+from fastapi import Depends, APIRouter, Request, Response
+from fast_frappe.ctrl import init_frappe, destroy_frappe
 import time
 from fast_frappe.socketio import sio
 default_space_id = 'default'
@@ -9,18 +10,19 @@ router = APIRouter()
 
 
 @router.post("/api/v1/push")
-def handlePush(req, res):
-    push = req.body
+async def handlePush(req: Request, res: Response):
+    init_frappe()
+    push = await req.json()
     # t0 = datetime.now()
     t0 = time.monotonic()
     try:
         # iterate each mutation in the push
-        for mutation in push.mutations:
+        for mutation in push['mutations']:
             t1 = time.monotonic()
             try:
-                processMutation(psg=frappe, clientID=push.clientID, spaceID=default_space_id, mutation=mutation)
+                processMutation(psg=frappe, clientID=push['clientID'], spaceID=default_space_id, mutation=mutation)
             except Exception as e:
-                processMutation(psg=frappe, clientID=push.clientID, spaceID=default_space_id, mutation=mutation, error=e)
+                processMutation(psg=frappe, clientID=push['clientID'], spaceID=default_space_id, mutation=mutation, error=e)
             print(f'Processed mutation in {datetime.now() - t1}')
         sio.emit("default", "poke", namespace="/")
         print("Sent ws response, poke")
@@ -30,29 +32,31 @@ def handlePush(req, res):
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         print(f"Processed push in {time.monotonic() - t0:.2f} seconds")
-
+    destroy_frappe()
 
 def processMutation(psg, clientID, spaceID, mutation, error):
-    """Table space only has 2 col (key, version)"""
-    '''Process a mutation from the client'''
+    """
+    Table space only has 2 col (key, version)
+    Process a mutation from the client
+    """
     # _dict = frappe.db.sql(f"""select version from tabSpace where key = '{spaceID}' for update""").as_dict()
-    prev_version = frappe.get_doc('tabSpace', filters={"key": "spaceID"})
+    prev_version = frappe.db.get_value('RepSpace', filters={"key": spaceID}, fieldname='version')
     nextVersion = prev_version + 1
     lastMutationID = getLatestMutationID(psg, clientID=clientID, required=False)
     nextMutationID = lastMutationID + 1
 
-    if mutation.id < nextMutationID:
+    if mutation['id'] < nextMutationID:
         raise Exception("Mutation ID has already been processed - skipping")
 
-    if mutation.id > nextMutationID:
+    if mutation['id'] > nextMutationID:
         raise Exception("Mutation ID is from the future - aborting")
 
     if (error is None):
         print(f'Processing mutation: {mutation}')
-        if mutation.name == 'createMessage':
-            createMessage(mutation.type, mutation.args, spaceID, nextVersion)
+        if mutation['name'] == 'createMessage':
+            createMessage(mutation['type'], mutation['args'], spaceID, nextVersion)
         else:
-            raise Exception(f"Unknown mutation {mutation.name}")
+            raise Exception(f"Unknown mutation {mutation['name']}")
     else:
         print(f'Error processing mutation: {mutation}')
 
