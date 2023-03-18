@@ -26,16 +26,17 @@ async def handlePush(req: Request, res: Response):
             print(f'Processed mutation in {time.monotonic() - t1}')
         sio.emit("default", "poke", namespace="/")
         print("Sent ws response, poke")
-        return {}
+        return {'process push'}
     except Exception as e:
         print(e)
-        raise HTTPException(status_code=500, detail=str(e))
+        # raise HTTPException(status_code=500, detail=str(e))
     finally:
         print(f"Processed push in {time.monotonic() - t0:.2f} seconds")
-    destroy_frappe()
+        destroy_frappe()
+    return {'finish process push'}
 
 
-def processMutation(psg, clientID, spaceID, mutation, error):
+def processMutation(psg, clientID, spaceID, mutation, error=None):
     """
     Table space only has 2 col (key, version)
     Process a mutation from the client
@@ -44,7 +45,7 @@ def processMutation(psg, clientID, spaceID, mutation, error):
     prev_version = frappe.db.get_value('RepSpace', filters={"key": spaceID}, fieldname='version')
     nextVersion = prev_version + 1
     lastMutationID = getLatestMutationID(psg, clientID=clientID, required=False)
-    nextMutationID = lastMutationID + 1
+    nextMutationID = int(lastMutationID) + 1
 
     if mutation['id'] < nextMutationID:
         raise Exception("Mutation ID has already been processed - skipping")
@@ -55,7 +56,8 @@ def processMutation(psg, clientID, spaceID, mutation, error):
     if (error is None):
         print(f'Processing mutation: {mutation}')
         if mutation['name'] == 'createMessage':
-            createMessage(mutation['type'], mutation['args'], spaceID, nextVersion)
+            print('processing mutation')
+            createMessage('wtf is this', mutation['args'], spaceID, nextVersion)
         else:
             raise Exception(f"Unknown mutation {mutation['name']}")
     else:
@@ -85,14 +87,14 @@ def getLatestMutationID(psg, clientID, required):
         _type_: _description_
     """
     # clientRow = frappe.db.get_value("Replicache Client", client_id=clientID, latest_mutation_id=required)
-    clientRow = frappe.db.get_value("RepClient", filters={'id': clientID})
+    clientRow = frappe.db.get_value("RepClient", filters={'id': clientID}, fieldname=['id', 'last_mutation_id'], as_dict=True)
     if not clientRow:
         if required:
             raise Exception(f"Client not found {clientID}")
         return 0
     else:
         # TODO parse in correct format
-        return clientRow.latest_mutation_id
+        return clientRow['last_mutation_id']
 
 
 def setLatestMutationID(psg, clientID, mutationID):
@@ -108,9 +110,8 @@ def setLatestMutationID(psg, clientID, mutationID):
 
     result = frappe.db.get_value("RepClient", filters={'id': clientID}, fieldname=['name'])
     if result:
-
         result.db.set_value("RepClient", result, {"latest_mutation_id": mutationID})
-        result.db.commit()
+        frappe.db.commit()
         # result.save()
     else:
         result = frappe.get_doc({
@@ -137,20 +138,24 @@ def createMessage(t, _dict, spaceID, version):
         spaceID (_type_): _description_
         version (_type_): _description_
     """
-    # using frappe query builder to insert into the database
-    _id, _from, content, order = _dict
-    new_mess = frappe.new_doc({
-        "doctype": "Replicache Message",
-        "type": t,
-        "id": _id,
-        "from": _from,
-        "content": content,
-        "order": order,
-        "space_id": spaceID,
-        "version": version
-    })
-    new_mess.save()
-
+    try:
+        print('run create message')
+        # using frappe query builder to insert into the database
+        # _id, _from, content, order = _dict
+        new_mess = frappe.get_doc({
+            "doctype": "RepMessage",
+            # "type": t,
+            "id": _dict['id'],
+            "sender": _dict['from'],
+            "context": _dict['content'],
+            "ord": _dict['order'],
+            "space_id": spaceID,
+            "version": version
+        })
+        new_mess.save()
+        frappe.db.commit()
+    except Exception as e:
+        print(e)
     # frappe.db.insert({
     #     "doctype": "Replicache Message",
     #     "type": t,
