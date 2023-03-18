@@ -9,8 +9,8 @@ from fast_frappe.socketio import sio
 router = APIRouter()
 
 
-@router.get('/v1/api/pull')
-def handle_pull(req: Request, res: Response, *args, **kwargs):
+@router.post('/api/v1/pull')
+def handle_pull(req: Request, res: Response):
     defaultSpaceID = 'default'
     pull = req.body
     print(f'Processing Pull {pull}')
@@ -56,11 +56,11 @@ def handle_pull(req: Request, res: Response, *args, **kwargs):
         res.close()
     except Exception as e:
         print(e)
-        res.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
-        res.body = str(e).encode()
+        # res.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+        # res.body = str(e).encode()
     finally:
         print(f"Processed pull in {time.time() - t0}")
-    return args, kwargs
+    return 'test'
 
 
 # @request.api("GET", "/v1/api/replicache_pull")

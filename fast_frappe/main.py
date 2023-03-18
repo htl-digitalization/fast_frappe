@@ -3,13 +3,24 @@ from typing import Optional
 import uvicorn
 
 from fastapi import FastAPI, Depends, Request, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fast_frappe.ctrl import init_frappe
 from fast_frappe.replicache.replicache_push import router as push_router
 from fast_frappe.replicache.replicache_pull import router as pull_router
 from fast_frappe.socketio import sio
 
+
 app = FastAPI()
 app.include_router(push_router)
+app.include_router(pull_router)
+origins = ["*"]  # Allow all origins
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 def add_init_frappe_to_request(request: Request, call_next):
