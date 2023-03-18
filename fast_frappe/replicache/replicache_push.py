@@ -23,7 +23,7 @@ async def handlePush(req: Request, res: Response):
                 processMutation(psg=frappe, clientID=push['clientID'], spaceID=default_space_id, mutation=mutation)
             except Exception as e:
                 processMutation(psg=frappe, clientID=push['clientID'], spaceID=default_space_id, mutation=mutation, error=e)
-            print(f'Processed mutation in {datetime.now() - t1}')
+            print(f'Processed mutation in {time.monotonic() - t1}')
         sio.emit("default", "poke", namespace="/")
         print("Sent ws response, poke")
         return {}
@@ -33,6 +33,7 @@ async def handlePush(req: Request, res: Response):
     finally:
         print(f"Processed push in {time.monotonic() - t0:.2f} seconds")
     destroy_frappe()
+
 
 def processMutation(psg, clientID, spaceID, mutation, error):
     """
@@ -84,7 +85,7 @@ def getLatestMutationID(psg, clientID, required):
         _type_: _description_
     """
     # clientRow = frappe.db.get_value("Replicache Client", client_id=clientID, latest_mutation_id=required)
-    clientRow = frappe.db.get_doc("RepClient", fitlers={'client_id': 'clientID'})
+    clientRow = frappe.db.get_value("RepClient", filters={'id': clientID})
     if not clientRow:
         if required:
             raise Exception(f"Client not found {clientID}")
@@ -104,17 +105,22 @@ def setLatestMutationID(psg, clientID, mutationID):
     """
     # TODO: direct copy of the javascript which is incorrect, this need to check if there is any row with the clientID, mutationID and update them
     # result = frappe.db.get_value("Replicache Client", client_id=clientID, latest_mutation_id=mutationID)
-    result = frappe.get_doc("RepClient", fitlers={'client_id': 'clientID'})
+
+    result = frappe.db.get_value("RepClient", filters={'id': clientID}, fieldname=['name'])
     if result:
-        result.set("latest_mutation_id", mutationID)
-        result.save()
+
+        result.db.set_value("RepClient", result, {"latest_mutation_id": mutationID})
+        result.db.commit()
+        # result.save()
     else:
-        result = frappe.new_doc({
-            "doctype": "Replicache Client",
-            "client_id": clientID,
-            "latest_mutation_id": mutationID
+        result = frappe.get_doc({
+            "doctype": "RepClient",
+            "id": clientID,
+            "last_mutation_id": mutationID
         })
-        result.save()
+        print(result.as_dict())
+        result.insert()
+        frappe.db.commit()
         # frappe.db.insert({
         #     "doctype": "Replicache Client",
         #     "client_id": clientID,
