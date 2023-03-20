@@ -90,29 +90,17 @@ def process_mutation(psg, clientID, spaceID, mutation, error=None):
     # frappe.db.set_value("Space", spaceID, "version", nextVersion)
 
 
-def getLatestMutationID(psg, clientID, required):
-    """Not sure I need the required here
+async def get_last_mutation_id(t, client_id, required):
+    client_row = await t.fetchrow(
+        "SELECT last_mutation_id FROM replicache_client WHERE id = $1", client_id
+    )
 
-    Args:
-        psg (_type_): _description_
-        clientID (_type_): _description_
-        required (_type_): _description_
-
-    Raises:
-        Exception: _description_
-
-    Returns:
-        _type_: _description_
-    """
-    # clientRow = frappe.db.get_value("Replicache Client", client_id=clientID, latest_mutation_id=required)
-    clientRow = frappe.db.get_value("RepClient", filters={'id': clientID}, fieldname=['id', 'last_mutation_id'], as_dict=True)
-    if not clientRow:
+    if not client_row:
         if required:
-            raise Exception(f"Client not found {clientID}")
+            raise Exception(f"client not found: {client_id}")
         return 0
-    else:
-        # TODO parse in correct format
-        return clientRow['last_mutation_id']
+
+    return int(client_row["last_mutation_id"])
 
 
 def setLatestMutationID(psg, clientID, mutationID):
