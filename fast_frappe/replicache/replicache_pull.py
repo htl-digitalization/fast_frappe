@@ -1,70 +1,72 @@
 import datetime
 import time
-from fast_frappe.replicache.replicache_push import getLatestMutationID
 import frappe
-from fastapi import FastAPI, Depends, Request, Response, HTTPException, Depends, APIRouter 
+from fast_frappe.replicache.replicache_push import getLatestMutationID
+from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Depends, Request, Response, HTTPException, Depends, APIRouter
 from fast_frappe.socketio import sio
-
+from fast_frappe.ctrl import init_frappe, destroy_frappe
+from db import tx, default_space_id
+from pydantic import BaseModel
+import json
+from replicache_push import get_last_mutation_id
 
 router = APIRouter()
 
 
+class PullRequestBody(BaseModel):
+    client_id: str
+    last_mutation_id: int
+    mutations: list
+
+
 @router.post('/api/v1/pull')
-def handle_pull(req: Request, res: Response):
-    defaultSpaceID = 'default'
-    pull = req.body
-    print(f'Processing Pull {pull}')
-    t0 = time.monotonic()
+async def replicache_pull(body: PullRequestBody):
+    print(f"Processing pull {json.dumps(body.dict())}")
+    t0 = time.time()
+
     try:
-        # await processPull(psg, pull)
-        # processPull(pull)
-        version = frappe.get_doc('RepSpace', filters={"key": defaultSpaceID}).version
-        # Get lmid for requesting client.
-        isExistingClient = pull.lastMutationID > 0
-        last_mutation_id = getLatestMutationID(frappe, client=pull.clientID, required=isExistingClient)
+        # Get current version for space.
+        await tx.execute("SELECT version FROM space WHERE key = %s", (default_space_id,))
+        version = (await tx.fetchone())[0]
 
-        # get changed domain objects since req version
-        fromVersion = getattr(req, 'cookies', 0)
-        doctype = frappe.qb.DocType("RepMessage")
-        # TODO: return as list
-        changed = frappe.qb.from_(doctype).select('id', 'sender', 'content', 'order', 'deleted').where(doctype.version > fromVersion).run()
-        # changed = frappe._qb_()('RepMessage', filters={"version": fromVersion})
+        # Get last_mutation_id for the requesting client.
+        is_existing_client = body.last_mutation_id > 0
+        last_mutation_id = await get_last_mutation_id(tx, body.client_id, is_existing_client)
 
+        # Get changed domain objects since the requested version.
+        from_version = body.cookie or 0
+        await tx.execute("SELECT id, sender, content, ord, deleted FROM message WHERE version > %s", (from_version,))
+        changed = await tx.fetchall()
+
+        # Build and return response.
         patch = []
         for row in changed:
-            if row.deleted:
-                if fromVersion > 0:
+            id, sender, content, ord, deleted = row
+            if deleted:
+                if from_version > 0:
                     patch.append({
-                        'op': 'del',
-                        'key': f'message/{row.id}'
+                        "op": "del",
+                        "key": f"message/{id}",
                     })
             else:
                 patch.append({
-                    'op': 'put',
-                    'key': f'message/{row.id}',
-                    'value': {
-                        'from': row.sender,
-                        'content': row.content,
-                        'order': int(row.order)
-                    }
+                    "op": "put",
+                    "key": f"message/{id}",
+                    "value": {
+                        "from": sender,
+                        "content": content,
+                        "order": int(ord),
+                    },
                 })
-        res.json({
+
+        return JSONResponse({
             "lastMutationID": last_mutation_id,
             "cookie": version,
             "patch": patch,
         })
-        res.close()
     except Exception as e:
-        print(e)
-        # res.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
-        # res.body = str(e).encode()
+        print(f"Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         print(f"Processed pull in {time.time() - t0}")
-    return 'test'
-
-
-# @request.api("GET", "/v1/api/replicache_pull")
-# @request.api("GET", '/v1/api/test2')
-# def handle_pull(*args, **kwargs):
-#     '''Handle the pull request from the client'''
-#     return args, kwargs

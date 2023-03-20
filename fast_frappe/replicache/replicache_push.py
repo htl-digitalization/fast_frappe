@@ -5,38 +5,56 @@ from fastapi import Depends, APIRouter, Request, Response
 from fast_frappe.ctrl import init_frappe, destroy_frappe
 import time
 from fast_frappe.socketio import sio
+from db import tx, default_space_id
 default_space_id = 'default'
+from pydantic import BaseModel
+import json
 router = APIRouter()
 
 
+class Mutation(BaseModel):
+    id: int
+    name: str
+    args: dict
+
+
+class PushRequestBody(BaseModel):
+    client_id: str
+    mutations: list[Mutation]
+
+
 @router.post("/api/v1/push")
-async def handlePush(req: Request, res: Response):
-    init_frappe()
-    push = await req.json()
-    # t0 = datetime.now()
-    t0 = time.monotonic()
+async def replicache_push(request: Request):
+    body: PushRequestBody = await request.json()
+    print(f"Processing push {json.dumps(body.dict())}")
+    t0 = time.time()
+
     try:
-        # iterate each mutation in the push
-        for mutation in push['mutations']:
-            t1 = time.monotonic()
+        for mutation in body.mutations:
+            t1 = time.time()
+
             try:
-                processMutation(psg=frappe, clientID=push['clientID'], spaceID=default_space_id, mutation=mutation)
+                await process_mutation(tx, body.client_id, default_space_id, mutation)
             except Exception as e:
-                processMutation(psg=frappe, clientID=push['clientID'], spaceID=default_space_id, mutation=mutation, error=e)
-            print(f'Processed mutation in {time.monotonic() - t1}')
-        sio.emit("default", "poke", namespace="/")
-        print("Sent ws response, poke")
-        return {'process push'}
+                print(f"Caught error from mutation {mutation} {e}")
+
+                await process_mutation(tx, body.client_id, default_space_id, mutation, e)
+
+            print(f"Processed mutation in {time.time() - t1}")
+
+        sio.connect("http://localhost:9000")
+        print("Send ws response")
+        sio.emit(default_space_id, "poke")
+
+        return {}
     except Exception as e:
-        print(e)
-        # raise HTTPException(status_code=500, detail=str(e))
+        print(f"Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
-        print(f"Processed push in {time.monotonic() - t0:.2f} seconds")
-        destroy_frappe()
-    return {'finish process push'}
+        print(f"Processed push in {time.time() - t0}")
 
 
-def processMutation(psg, clientID, spaceID, mutation, error=None):
+def process_mutation(psg, clientID, spaceID, mutation, error=None):
     """
     Table space only has 2 col (key, version)
     Process a mutation from the client
