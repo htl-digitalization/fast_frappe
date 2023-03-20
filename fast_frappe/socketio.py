@@ -2,7 +2,7 @@ import socketio
 
 
 def connect_socketIO(url: str = 'http://localhost:9000'):
-	sio = socketio.AsyncClient()
+	sio = socketio.Client()
 	sio.connect(url)
 	return sio
 

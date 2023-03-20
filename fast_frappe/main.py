@@ -11,8 +11,6 @@ from fast_frappe.socketio import sio
 
 
 app = FastAPI()
-app.include_router(push_router)
-app.include_router(pull_router)
 origins = ["*"]  # Allow all origins
 app.add_middleware(
     CORSMiddleware,
@@ -21,6 +19,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(push_router)
+app.include_router(pull_router)
 
 
 def add_init_frappe_to_request(request: Request, call_next):

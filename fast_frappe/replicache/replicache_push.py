@@ -13,6 +13,10 @@ import json
 router = APIRouter()
 
 
+def convert_dict_2_namedtuple(d):
+    return namedtuple('X', d.keys())(*d.values())
+
+
 class Mutation(BaseModel):
     id: int
     name: str
@@ -45,9 +49,9 @@ async def replicache_push(request: Request):
 
             print(f"Processed mutation in {time.time() - t1}")
 
-        sio.connect("http://localhost:9000")
+        # await sio.connect("http://localhost:9000")
         print("Send ws response")
-        sio.emit(default_space_id, "poke")
+        await sio.emit(default_space_id, "poke")
 
         return {}
     except Exception as e:
@@ -58,13 +62,13 @@ async def replicache_push(request: Request):
 
 
 async def process_mutation(tx, clientID, space_id, mutation, error=None):
-    prev_version_row = await tx(f"SELECT version FROM space WHERE key = {space_id} FOR UPDATE")
+    prev_version_row = await tx(f"""SELECT version FROM space WHERE key='{space_id}' FOR UPDATE""")
     prev_version = prev_version_row["version"]
-    next_version = prev_version + 1
+    next_version = int(prev_version) + 1
 
     last_mutation_id = await get_last_mutation_id(tx, clientID, False)
     next_mutation_id = last_mutation_id + 1
-
+    mutation = convert_dict_2_namedtuple(mutation)
     print(f"nextVersion: {next_version}, nextMutationID: {next_mutation_id}")
 
     if mutation.id < next_mutation_id:
@@ -75,14 +79,14 @@ async def process_mutation(tx, clientID, space_id, mutation, error=None):
         raise Exception(f"Mutation {mutation.id} is from the future - aborting")
 
     if error is None:
-        print(f"Processing mutation: {json.dumps(mutation.dict())}")
+        print(f"Processing mutation: {json.dumps(mutation)}")
 
         if mutation.name == "createMessage":
             await create_message(tx, mutation.args, space_id, next_version)
         else:
             raise Exception(f"Unknown mutation: {mutation.name}")
     else:
-        print(f"Handling error from mutation {json.dumps(mutation.dict())} {error}")
+        print(f"Handling error from mutation {json.dumps(mutation)} {error}")
 
     print(f"Setting {clientID} last_mutation_id to {next_mutation_id}")
     await set_last_mutation_id(tx, clientID, next_mutation_id)
@@ -91,8 +95,8 @@ async def process_mutation(tx, clientID, space_id, mutation, error=None):
 
 
 async def get_last_mutation_id(tx, clientID, required):
-    client_row = await tx.fetchrow(
-        "SELECT last_mutation_id FROM replicache_client WHERE id = $1", clientID
+    client_row = await tx(
+        f"SELECT last_mutation_id FROM replicache_client WHERE id = '{clientID}'"
     )
 
     if not client_row:
@@ -104,30 +108,23 @@ async def get_last_mutation_id(tx, clientID, required):
 
 
 async def set_last_mutation_id(tx, clientID, mutation_id):
-    result = await tx(
-        "UPDATE replicache_client SET last_mutation_id = $2 WHERE id = $1",
-        clientID,
-        mutation_id,
-    )
+    result = await tx(f"UPDATE replicache_client SET last_mutation_id = {mutation_id} WHERE id = '{clientID}'")
 
     if result == "UPDATE 0":
         await tx(
-            "INSERT INTO replicache_client (id, last_mutation_id) VALUES ($1, $2)",
-            clientID,
-            mutation_id,
+            f"INSERT INTO replicache_client (id, last_mutation_id) VALUES ('{clientID}', {mutation_id})",
         )
 
 
 async def create_message(tx, args, space_id, version):
     await tx(
-        """
+        f"""
         INSERT INTO message (id, space_id, sender, content, ord, deleted, version)
-        VALUES ($1, $2, $3, $4, $5, false, $6)
-        """,
-        args["id"],
-        space_id,
-        args["from"],
-        args["content"],
-        args["order"],
-        version,
-    )
+        VALUES ('{args["id"]}',
+            '{space_id}',
+            '{args["from"]}',
+            '{args["content"]}',
+            '{args["order"]}',
+            false,
+            '{version}'
+        """)
