@@ -1,4 +1,5 @@
 # import datetime
+from collections import namedtuple
 from http.client import HTTPException
 # import frappe
 from fastapi import APIRouter, Request
@@ -19,26 +20,28 @@ class Mutation(BaseModel):
 
 
 class PushRequestBody(BaseModel):
-    client_id: str
+    clientID: str
     mutations: list[Mutation]
 
 
 @router.post("/api/v1/push")
 async def replicache_push(request: Request):
     body: PushRequestBody = await request.json()
-    print(f"Processing push {json.dumps(body.dict())}")
+    print(f"Processing push {json.dumps(body)}")
     t0 = time.time()
+    Body = namedtuple('Person', body.keys())
+    body = Body(*body.values())
 
     try:
         for mutation in body.mutations:
             t1 = time.time()
 
             try:
-                await process_mutation(tx, body.client_id, default_space_id, mutation)
+                await process_mutation(tx, body.clientID, default_space_id, mutation)
             except Exception as e:
                 print(f"Caught error from mutation {mutation} {e}")
 
-                await process_mutation(tx, body.client_id, default_space_id, mutation, e)
+                await process_mutation(tx, body.clientID, default_space_id, mutation, e)
 
             print(f"Processed mutation in {time.time() - t1}")
 
@@ -54,12 +57,12 @@ async def replicache_push(request: Request):
         print(f"Processed push in {time.time() - t0}")
 
 
-async def process_mutation(tx, client_id, space_id, mutation, error=None):
-    prev_version_row = await tx.exec("SELECT version FROM space WHERE key = $1 FOR UPDATE", space_id)
+async def process_mutation(tx, clientID, space_id, mutation, error=None):
+    prev_version_row = await tx(f"SELECT version FROM space WHERE key = {space_id} FOR UPDATE")
     prev_version = prev_version_row["version"]
     next_version = prev_version + 1
 
-    last_mutation_id = await get_last_mutation_id(tx, client_id, False)
+    last_mutation_id = await get_last_mutation_id(tx, clientID, False)
     next_mutation_id = last_mutation_id + 1
 
     print(f"nextVersion: {next_version}, nextMutationID: {next_mutation_id}")
@@ -81,42 +84,42 @@ async def process_mutation(tx, client_id, space_id, mutation, error=None):
     else:
         print(f"Handling error from mutation {json.dumps(mutation.dict())} {error}")
 
-    print(f"Setting {client_id} last_mutation_id to {next_mutation_id}")
-    await set_last_mutation_id(tx, client_id, next_mutation_id)
+    print(f"Setting {clientID} last_mutation_id to {next_mutation_id}")
+    await set_last_mutation_id(tx, clientID, next_mutation_id)
 
-    await tx.execute("UPDATE space SET version = $1 WHERE key = $2", next_version, space_id)
+    await tx("UPDATE space SET version = $1 WHERE key = $2", next_version, space_id)
 
 
-async def get_last_mutation_id(tx, client_id, required):
+async def get_last_mutation_id(tx, clientID, required):
     client_row = await tx.fetchrow(
-        "SELECT last_mutation_id FROM replicache_client WHERE id = $1", client_id
+        "SELECT last_mutation_id FROM replicache_client WHERE id = $1", clientID
     )
 
     if not client_row:
         if required:
-            raise Exception(f"client not found: {client_id}")
+            raise Exception(f"client not found: {clientID}")
         return 0
 
     return int(client_row["last_mutation_id"])
 
 
-async def set_last_mutation_id(tx, client_id, mutation_id):
-    result = await tx.execute(
+async def set_last_mutation_id(tx, clientID, mutation_id):
+    result = await tx(
         "UPDATE replicache_client SET last_mutation_id = $2 WHERE id = $1",
-        client_id,
+        clientID,
         mutation_id,
     )
 
     if result == "UPDATE 0":
-        await tx.execute(
+        await tx(
             "INSERT INTO replicache_client (id, last_mutation_id) VALUES ($1, $2)",
-            client_id,
+            clientID,
             mutation_id,
         )
 
 
 async def create_message(tx, args, space_id, version):
-    await tx.execute(
+    await tx(
         """
         INSERT INTO message (id, space_id, sender, content, ord, deleted, version)
         VALUES ($1, $2, $3, $4, $5, false, $6)
