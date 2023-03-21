@@ -28,7 +28,7 @@ class PushRequestBody(BaseModel):
     mutations: list[Mutation]
 
 
-@router.post("/api/v1/push")
+@router.post("/api/v1/reppush")
 async def replicache_push(request: Request):
     body: PushRequestBody = await request.json()
     print(f"Processing push {json.dumps(body)}")
@@ -51,12 +51,12 @@ async def replicache_push(request: Request):
 
         # await sio.connect("http://localhost:9000")
         print("Send ws response")
-        await sio.emit(default_space_id, "poke")
+        sio.emit(default_space_id, "poke")
 
         return {}
     except Exception as e:
         print(f"Error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e.with_traceback()))
     finally:
         print(f"Processed push in {time.time() - t0}")
 
@@ -73,7 +73,7 @@ async def process_mutation(tx, clientID, space_id, mutation, error=None):
 
     if mutation.id < next_mutation_id:
         print(f"Mutation {mutation.id} has already been processed - skipping")
-        return
+        return (f"Mutation {mutation.id} has already been processed - skipping")
 
     if mutation.id > next_mutation_id:
         raise Exception(f"Mutation {mutation.id} is from the future - aborting")
@@ -91,7 +91,7 @@ async def process_mutation(tx, clientID, space_id, mutation, error=None):
     print(f"Setting {clientID} last_mutation_id to {next_mutation_id}")
     await set_last_mutation_id(tx, clientID, next_mutation_id)
 
-    await tx("UPDATE space SET version = $1 WHERE key = $2", next_version, space_id)
+    await tx("UPDATE space SET version = '{next_version}' WHERE key = 'space_id'", )
 
 
 async def get_last_mutation_id(tx, clientID, required):
@@ -108,12 +108,15 @@ async def get_last_mutation_id(tx, clientID, required):
 
 
 async def set_last_mutation_id(tx, clientID, mutation_id):
-    result = await tx(f"UPDATE replicache_client SET last_mutation_id = {mutation_id} WHERE id = '{clientID}'")
-
-    if result == "UPDATE 0":
+    # result = await tx(f"UPDATE replicache_client SET last_mutation_id = {mutation_id} WHERE id = '{clientID}'")
+    # TODO: problem here of client
+    client = await tx(f"SELECT * FROM replicache_client WHERE id = '{clientID}'")
+    if client is None:
         await tx(
             f"INSERT INTO replicache_client (id, last_mutation_id) VALUES ('{clientID}', {mutation_id})",
         )
+    else:
+        await tx(f"UPDATE replicache_client SET last_mutation_id = {mutation_id} WHERE id = '{clientID}'")
 
 
 async def create_message(tx, args, space_id, version):
@@ -126,5 +129,5 @@ async def create_message(tx, args, space_id, version):
             '{args["content"]}',
             '{args["order"]}',
             false,
-            '{version}'
+            '{version}')
         """)

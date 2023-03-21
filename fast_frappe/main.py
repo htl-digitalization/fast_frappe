@@ -7,8 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fast_frappe.ctrl import init_frappe
 from fast_frappe.replicache.replicache_push import router as push_router
 from fast_frappe.replicache.replicache_pull import router as pull_router
-from fast_frappe.socketio import sio
-
+# from fast_frappe.socketio import sio
 
 app = FastAPI()
 origins = ["*"]  # Allow all origins
