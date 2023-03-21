@@ -58,21 +58,21 @@ async def replicache_pull(req: Request):
         # Build and return response.
         patch = []
         for row in changed:
-            id, sender, content, ord, deleted = row
-            if deleted:
+            # id, sender, content, ord, deleted = row
+            if row['deleted']:
                 if from_version > 0:
                     patch.append({
                         "op": "del",
-                        "key": f"message/{id}",
+                        "key": f"message/{row['id']}",
                     })
             else:
                 patch.append({
                     "op": "put",
                     "key": f"message/{id}",
                     "value": {
-                        "from": sender,
-                        "content": content,
-                        "order": int(ord),
+                        "from": row['sender'],
+                        "content": row['content'],
+                        "order": int(row['ord']),
                     },
                 })
 

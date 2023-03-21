@@ -96,7 +96,7 @@ async def process_mutation(conn, clientID, space_id, mutation, error=None):
     print(f"Setting {clientID} last_mutation_id to {next_mutation_id}")
     await set_last_mutation_id(conn, clientID, next_mutation_id)
 
-    await tx(conn, "UPDATE space SET version = '{next_version}' WHERE key = 'space_id'", )
+    await tx(conn, f"UPDATE space SET version = '{next_version}' WHERE key = '{space_id}'")
 
 
 async def get_last_mutation_id(conn, clientID, required):
