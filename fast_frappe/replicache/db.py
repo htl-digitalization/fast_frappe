@@ -17,13 +17,12 @@ async def tx(conn, sql):
 
 async def cursor(conn, sql, fetch_number=1):
     async with conn.transaction(isolation="serializable"):
-        try:
-            async with conn.cursor(sql) as cursor:
-                rows = await cursor.fetch(fetch_number)
-            if fetch_number == 1:
-                return [dict(row) for row in rows][0]
-            else:
-                return [dict(row) for row in rows]
-        except Exception as e:
-            print(e)
+        # async with conn.cursor(sql) as cursor:
+        print(sql)
+        rows = await conn.fetch(sql)
+        if len(rows) == 0:
             return None
+        elif fetch_number == 1:
+            return [dict(row) for row in rows][0]
+        else:
+            return [dict(row) for row in rows]
