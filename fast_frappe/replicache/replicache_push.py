@@ -56,8 +56,8 @@ async def replicache_push(request: Request):
         return 'processed push 1'
     except Exception as e:
         print(f"Error: {e}")
-        return e
-        # raise HTTPException(status_code=500, detail=str(e))
+        # return e
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         print(f"Processed push in {time.time() - t0}")
         return 'processed push'
@@ -127,8 +127,7 @@ async def set_last_mutation_id(conn, clientID, mutation_id):
 
 
 async def create_message(conn, args, space_id, version):
-    await tx(conn,
-        f"""
+    await tx(conn, f"""
         INSERT INTO message (id, space_id, sender, content, ord, deleted, version)
         VALUES ('{args["id"]}',
             '{space_id}',
