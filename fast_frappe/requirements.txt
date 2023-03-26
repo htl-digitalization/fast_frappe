@@ -1,3 +1,5 @@
 asyncio
 asyncpg
 pydantic
+openai
+openpyxl
