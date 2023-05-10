@@ -1,4 +1,8 @@
-frappe
+# frappe
 fastapi
-uvicorn
-python-socketio[asyncio_client]
+uvicorn[standard]
+# python-socketio[asyncio_client]
+python-socketio[asgi]
+aiofiles
+llama_index=0.0.62
+weaviate-client=3.17.0

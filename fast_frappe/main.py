@@ -1,53 +1,103 @@
-import frappe
-from typing import Optional
-import uvicorn
-
-from fastapi import FastAPI, Depends, Request, HTTPException
+import asyncio
+import time
+from fastapi import FastAPI, WebSocket
+from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fast_frappe.ctrl import init_frappe
-from fast_frappe.replicache.replicache_push import router as push_router
-from fast_frappe.replicache.replicache_pull import router as pull_router
-from fast_frappe.socketio import sio
-
-
+import json
 app = FastAPI()
-app.include_router(push_router)
-app.include_router(pull_router)
-origins = ["*"]  # Allow all origins
+# Add the CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-
-def add_init_frappe_to_request(request: Request, call_next):
-    init_frappe()
-    # validate user from cookie
-    # request.cookies[]
-    session = frappe.db.sql(f'select * from `tabSessions` where sid={request.cookies.sid} and username={request.cookies.username}')
-    response = call_next(request, session)
-    return response
+html = """
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Chat</title>
+    </head>
+    <body>
+        <h1>WebSocket Chat</h1>
+        <form action="" onsubmit="sendMessage(event)">
+            <input type="text" id="messageText" autocomplete="off"/>
+            <button>Send</button>
+        </form>
+        <ul id='messages'>
+        </ul>
+        <script>
+            var ws = new WebSocket("ws://localhost:8888/ws");
+            ws.onmessage = function(event) {
+                var messages = document.getElementById('messages')
+                var message = document.createElement('li')
+                var content = document.createTextNode(event.data)
+                message.appendChild(content)
+                messages.appendChild(message)
+            };
+            function sendMessage(event) {
+                var input = document.getElementById("messageText")
+                ws.send(input.value)
+                input.value = ''
+                event.preventDefault()
+            }
+        </script>
+    </body>
+</html>
+"""
 
 
 @app.get("/")
-def read_root():
-    init_frappe()
-    available_doctypes = frappe.get_list("DocType")
-    settings = frappe.get_single("System Settings")
-    return {
-        "available_doctypes": available_doctypes,
-        "settings": settings.as_dict(),
-    }
+async def get():
+    return HTMLResponse(html)
 
+# @app.websocket("/ws")
+# async def llama_index_ws_response():
 
-# @app.middleware("http")
-@app.get("/api")
-def authenticate_user(request: Request):
-    init_frappe() # to be removed
-    return
+# @app.websocket("/ws")
+# async def websocket_endpoint(websocket: WebSocket):
+#     await websocket.accept()
+#     while True:
+#         data = await websocket.receive_text()
+#         data_json = json.loads(data)
+#         message = data_json.get("message")
+#         response = {"received_message": message}
+#         for i in range(3):
+#             await websocket.send_text(json.dumps(response))
+#             time.sleep(1)          
 
-# if __name__ == '__main__':
-#     uvicorn.run("main:app", port=8000, reload=True)
+def data_generator():
+    # counter = 0
+    for i in range(3):
+        # counter += 1
+        yield f"Data {i}"
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+
+    async def send_data_periodically(generator):
+        for data in generator:
+            response = {"streamed_data": data}
+            await websocket.send_text(json.dumps(response))
+            await asyncio.sleep(0.5)  # Send data every 1 second
+
+    async def receive_data():
+        while True:
+            data = await websocket.receive_text()
+            data_json = json.loads(data)
+            message = data_json.get("message")
+            response = {"received_message": message}
+            await websocket.send_text(json.dumps(response))
+
+    generator = data_generator()
+    await asyncio.gather(send_data_periodically(generator), receive_data())
+
+# @app.websocket("/ws")
+# async def websocket_endpoint(websocket: WebSocket):
+#     await websocket.accept()
+#     while True:
+#         data = await websocket.receive_text()
+#         await websocket.send_text(f"Message text was: {data}")
